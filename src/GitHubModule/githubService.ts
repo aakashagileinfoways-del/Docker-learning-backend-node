@@ -68,7 +68,10 @@ export class GitHubService {
   async sync(userId: string): Promise<{ synced: number; skipped: number }> {
     const conn = await this.getConnection(userId);
     const plainToken = this.encryptionService.decrypt(conn.accessToken);
-    const ghEvents = await this.fetchUserEvents(plainToken);
+    const ghEvents = await this.fetchUserEvents(
+      plainToken,
+      conn.githubUsername,
+    );
 
     const eventDtos = ghEvents.map((gh) => this.mapGitHubEventToDto(gh));
 
@@ -122,18 +125,41 @@ export class GitHubService {
 
   private async fetchUserEvents(
     accessToken: string,
+    username: string,
   ): Promise<GitHubApiEvent[]> {
-    const res = await fetch(`${this.apiBase}/user/events?per_page=100`, {
-      headers: this.authHeaders(accessToken),
-    });
+    // Prefer authenticated events (includes private). Fall back to public events.
+    const endpoints = [
+      `${this.apiBase}/user/events?per_page=100`,
+      `${this.apiBase}/users/${encodeURIComponent(username)}/events?per_page=100`,
+      `${this.apiBase}/users/${encodeURIComponent(username)}/events/public?per_page=100`,
+    ];
 
-    if (!res.ok) {
-      throw new BadRequestException(
-        `GitHub API error: ${res.status} ${res.statusText}`,
-      );
+    let lastStatus = 0;
+    let lastStatusText = '';
+
+    for (const url of endpoints) {
+      const res = await fetch(url, {
+        headers: this.authHeaders(accessToken),
+      });
+
+      if (res.ok) {
+        return res.json() as Promise<GitHubApiEvent[]>;
+      }
+
+      lastStatus = res.status;
+      lastStatusText = res.statusText;
+
+      // Retry next endpoint for 404/403 (common with missing scopes / fine-grained PATs)
+      if (res.status !== 404 && res.status !== 403) {
+        break;
+      }
     }
 
-    return res.json() as Promise<GitHubApiEvent[]>;
+    throw new BadRequestException(
+      `GitHub API error: ${lastStatus} ${lastStatusText}. ` +
+        'Create a Classic PAT with the "repo" scope checked (not Fine-grained), ' +
+        'then reconnect in the app. Tokens with no scopes can connect but cannot sync.',
+    );
   }
 
   private authHeaders(accessToken: string): Record<string, string> {
