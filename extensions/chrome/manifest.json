@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "AI Time Machine — Chrome Memory",
+  "version": "0.1.0",
+  "description": "Pushes tab/browse activity to AI Time Machine via /connectors/ingest",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://localhost:3000/*", "http://localhost:3020/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "AI Time Machine Chrome",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}

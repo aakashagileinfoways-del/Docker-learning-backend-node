@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>AI Time Machine — Settings</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 480px; margin: 24px; }
+      label { display: block; margin-top: 12px; font-weight: 600; }
+      input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+      button { margin-top: 16px; padding: 10px 16px; cursor: pointer; }
+      .hint { color: #555; font-size: 13px; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>AI Time Machine</h1>
+    <p class="hint">
+      Paste your JWT from the web app (localStorage <code>atm_accessToken</code>)
+      and your API URL.
+    </p>
+
+    <label>API URL</label>
+    <input id="apiUrl" placeholder="http://localhost:3000" />
+
+    <label>Access token (JWT)</label>
+    <input id="token" type="password" placeholder="eyJhbGciOi..." />
+
+    <button id="save">Save</button>
+    <p id="status" class="hint"></p>
+
+    <script src="options.js"></script>
+  </body>
+</html>
