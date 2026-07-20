@@ -217,7 +217,9 @@ GET /timeline/replay?date=YYYY-MM-DD&timezone=Asia/Kolkata
 
 ### VS Code / Chrome ✅ (ingest path)
 - [ ] Connect (enable) card
-- [ ] Document extension install
+- [ ] Install extension from `extensions/chrome` (see that folder README)
+- [ ] Paste JWT + API URL in extension settings
+- [ ] Browse sites → events appear under Chrome filter
 - [ ] Extension uses JWT + `/connectors/ingest`
 
 ### Notion / Slack ✅ (token sync)
