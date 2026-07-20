@@ -34,12 +34,13 @@ Written after each phase's backend ships. See [frontend/README.md](frontend/READ
 | 2     | [phase-2-frontend-integration.md](frontend/phase-2-frontend-integration.md) | Timeline, GitHub                          |
 | 3     | [phase-3-frontend-integration.md](frontend/phase-3-frontend-integration.md) | Data models, full API client, all screens |
 | 4     | [phase-4-frontend-integration.md](frontend/phase-4-frontend-integration.md) | JWT auth, retention, breaking API changes |
+| 5     | [phase-5-all-connectors-frontend.md](frontend/phase-5-all-connectors-frontend.md) | All source chips: connect / sync / ingest |
 
 ## Upcoming
 
 | Phase | Topic                        | Status  |
 | ----- | ---------------------------- | ------- |
-| 5     | AI (embeddings, RAG, memory) | Planned |
+| 5+    | AI (embeddings, RAG, memory) | Planned |
 | 6     | UI/UX wireframes             | Planned |
 | 7     | DevOps (Docker, K8s, CI)     | Planned |
 | 8     | Investor documents           | Planned |
