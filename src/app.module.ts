@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './AuthModule/auth.module';
 import { CommonModule } from './common/common.module';
+import { ConnectorsModule } from './ConnectorsModule/connectorsModule';
 import { EventModule } from './EventModule/eventModule';
 import { GitHubModule } from './GitHubModule/githubModule';
 import { MongodbModule } from './mongodb/mongodb.module';
@@ -20,6 +21,7 @@ import { UserModule } from './UserModule/userModule';
     EventModule,
     TimelineModule,
     GitHubModule,
+    ConnectorsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
