@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -20,6 +19,11 @@ type GitHubApiEvent = {
   repo: { name: string };
   payload: Record<string, unknown>;
   created_at: string;
+};
+
+type GitHubCommit = {
+  sha: string;
+  commit: { message: string };
 };
 
 @Injectable()
@@ -65,7 +69,9 @@ export class GitHubService {
     };
   }
 
-  async sync(userId: string): Promise<{ synced: number; skipped: number }> {
+  async sync(
+    userId: string,
+  ): Promise<{ synced: number; skipped: number; updated: number }> {
     const conn = await this.getConnection(userId);
     const plainToken = this.encryptionService.decrypt(conn.accessToken);
     const ghEvents = await this.fetchUserEvents(
@@ -73,28 +79,25 @@ export class GitHubService {
       conn.githubUsername,
     );
 
-    const eventDtos = ghEvents.map((gh) => this.mapGitHubEventToDto(gh));
-
     let synced = 0;
     let skipped = 0;
+    let updated = 0;
 
-    for (const dto of eventDtos) {
-      try {
-        await this.eventService.createEvent(userId, dto);
-        synced++;
-      } catch (err) {
-        if (err instanceof ConflictException) {
-          skipped++;
-        } else {
-          throw err;
-        }
-      }
+    for (const gh of ghEvents) {
+      const dto = await this.mapGitHubEventToDto(gh, plainToken);
+      const result = await this.eventService.upsertBySourceEventId(
+        userId,
+        dto,
+      );
+      if (result === 'created') synced++;
+      else if (result === 'updated') updated++;
+      else skipped++;
     }
 
     conn.lastSyncedAt = new Date();
     await conn.save();
 
-    return { synced, skipped };
+    return { synced, skipped, updated };
   }
 
   private async getConnection(
@@ -127,7 +130,6 @@ export class GitHubService {
     accessToken: string,
     username: string,
   ): Promise<GitHubApiEvent[]> {
-    // Prefer authenticated events (includes private). Fall back to public events.
     const endpoints = [
       `${this.apiBase}/user/events?per_page=100`,
       `${this.apiBase}/users/${encodeURIComponent(username)}/events?per_page=100`,
@@ -149,7 +151,6 @@ export class GitHubService {
       lastStatus = res.status;
       lastStatusText = res.statusText;
 
-      // Retry next endpoint for 404/403 (common with missing scopes / fine-grained PATs)
       if (res.status !== 404 && res.status !== 403) {
         break;
       }
@@ -162,6 +163,68 @@ export class GitHubService {
     );
   }
 
+  /**
+   * Events API often omits payload.commits. Fetch messages via Commits API.
+   */
+  private async resolvePushCommitMessages(
+    accessToken: string,
+    repo: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ messages: string[]; shortSha: string }> {
+    const head = (payload.head as string) ?? '';
+    const before = (payload.before as string) ?? '';
+    const shortSha = head ? head.slice(0, 7) : '';
+
+    const fromPayload = (payload.commits as { message?: string }[]) ?? [];
+    const payloadMessages = fromPayload
+      .map((c) => c.message?.trim())
+      .filter((m): m is string => !!m);
+
+    if (payloadMessages.length > 0) {
+      return { messages: payloadMessages, shortSha };
+    }
+
+    if (!head || !repo.includes('/')) {
+      return { messages: [], shortSha };
+    }
+
+    // Prefer compare when we have before → head (multi-commit pushes)
+    const zeroSha = /^0+$/;
+    if (before && !zeroSha.test(before) && before !== head) {
+      const compareUrl = `${this.apiBase}/repos/${repo}/compare/${before}...${head}`;
+      const compareRes = await fetch(compareUrl, {
+        headers: this.authHeaders(accessToken),
+      });
+      if (compareRes.ok) {
+        const data = (await compareRes.json()) as {
+          commits?: GitHubCommit[];
+        };
+        const messages =
+          data.commits
+            ?.map((c) => c.commit?.message?.trim())
+            .filter((m): m is string => !!m) ?? [];
+        if (messages.length > 0) {
+          return { messages, shortSha };
+        }
+      }
+    }
+
+    // Fallback: single commit by head SHA
+    const commitUrl = `${this.apiBase}/repos/${repo}/commits/${head}`;
+    const commitRes = await fetch(commitUrl, {
+      headers: this.authHeaders(accessToken),
+    });
+    if (commitRes.ok) {
+      const data = (await commitRes.json()) as GitHubCommit;
+      const message = data.commit?.message?.trim();
+      if (message) {
+        return { messages: [message], shortSha };
+      }
+    }
+
+    return { messages: [], shortSha };
+  }
+
   private authHeaders(accessToken: string): Record<string, string> {
     return {
       Authorization: `Bearer ${accessToken}`,
@@ -170,13 +233,17 @@ export class GitHubService {
     };
   }
 
-  mapGitHubEventToDto(gh: GitHubApiEvent): CreateEventDto {
+  async mapGitHubEventToDto(
+    gh: GitHubApiEvent,
+    accessToken: string,
+  ): Promise<CreateEventDto> {
     const repo = gh.repo.name;
     const payload = gh.payload;
-    const { type, title, content } = this.resolveEventContent(
+    const { type, title, content } = await this.resolveEventContent(
       gh.type,
       repo,
       payload,
+      accessToken,
     );
 
     return {
@@ -196,21 +263,28 @@ export class GitHubService {
     };
   }
 
-  private resolveEventContent(
+  private async resolveEventContent(
     ghType: string,
     repo: string,
     payload: Record<string, unknown>,
-  ): { type: CreateEventDto['type']; title: string; content: string } {
+    accessToken: string,
+  ): Promise<{ type: CreateEventDto['type']; title: string; content: string }> {
     switch (ghType) {
       case 'PushEvent': {
-        const commits = (payload.commits as { message: string }[]) ?? [];
-        const head = (payload.head as string) ?? '';
-        const messages = commits.map((c) => c.message).join('\n');
-        return {
-          type: 'commit',
-          title: `Push to ${repo}${head ? ` (${head.slice(0, 7)})` : ''}`,
-          content: messages || `Pushed ${commits.length} commit(s)`,
-        };
+        const { messages, shortSha } = await this.resolvePushCommitMessages(
+          accessToken,
+          repo,
+          payload,
+        );
+        const firstLine = messages[0]?.split('\n')[0] ?? '';
+        const title = firstLine
+          ? `${firstLine}${shortSha ? ` (${shortSha})` : ''}`
+          : `Push to ${repo}${shortSha ? ` (${shortSha})` : ''}`;
+        const content =
+          messages.length > 0
+            ? messages.join('\n\n')
+            : `Push to ${repo}${shortSha ? ` @ ${shortSha}` : ''}`;
+        return { type: 'commit', title, content };
       }
       case 'PullRequestEvent': {
         const pr = payload.pull_request as {

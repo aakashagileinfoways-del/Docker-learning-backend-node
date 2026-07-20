@@ -41,10 +41,58 @@ export class EventService {
           ? (err as { code: number }).code
           : undefined;
       if (code === 11000) {
-        throw new ConflictException('Event already exists (duplicate sourceEventId)');
+        throw new ConflictException(
+          'Event already exists (duplicate sourceEventId)',
+        );
       }
       throw err;
     }
+  }
+
+  /** Insert or refresh title/content/metadata for the same sourceEventId. */
+  async upsertBySourceEventId(
+    userId: string,
+    dto: CreateEventDto,
+  ): Promise<'created' | 'updated' | 'unchanged'> {
+    if (!dto.sourceEventId) {
+      await this.createEvent(userId, dto);
+      return 'created';
+    }
+
+    const existing = await this.eventRepository
+      .findOne({
+        userId,
+        source: dto.source,
+        sourceEventId: dto.sourceEventId,
+      })
+      .exec();
+
+    if (!existing) {
+      await this.createEvent(userId, dto);
+      return 'created';
+    }
+
+    const nextContent = dto.content ?? '';
+    const isPlaceholder =
+      !existing.content ||
+      existing.content.startsWith('Pushed 0 commit') ||
+      /^Pushed \d+ commit/.test(existing.content) ||
+      existing.content.startsWith('Push to ');
+
+    const titleChanged = existing.title !== dto.title;
+    const contentImproved =
+      isPlaceholder && nextContent.length > 0 && nextContent !== existing.content;
+
+    if (!titleChanged && !contentImproved) {
+      return 'unchanged';
+    }
+
+    if (titleChanged) existing.title = dto.title;
+    if (contentImproved) existing.content = nextContent;
+    if (dto.summary) existing.summary = dto.summary;
+    if (dto.metadata) existing.metadata = dto.metadata;
+    await existing.save();
+    return 'updated';
   }
 
   async createEventsBatch(
