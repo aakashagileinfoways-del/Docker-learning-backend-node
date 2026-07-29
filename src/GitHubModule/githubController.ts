@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import type { AuthUser } from '../AuthModule/auth.dto';
 import { JwtAuthGuard } from '../AuthModule/jwt-auth.guard';
 import { CurrentUser } from '../AuthModule/current-user.decorator';
@@ -26,5 +26,19 @@ export class GitHubController {
   @Get('status')
   async status(@CurrentUser() user: AuthUser) {
     return this.githubService.getStatus(user.userId);
+  }
+
+  @Get('projects')
+  async listProjects(@CurrentUser() user: AuthUser) {
+    return this.githubService.listProjects(user.userId);
+  }
+
+  @Post('projects/:owner/:repo/sync')
+  async syncProject(
+    @CurrentUser() user: AuthUser,
+    @Param('owner') owner: string,
+    @Param('repo') repo: string,
+  ) {
+    return this.githubService.syncProject(user.userId, owner, repo);
   }
 }

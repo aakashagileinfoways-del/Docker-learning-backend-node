@@ -1,20 +1,6 @@
-# Frontend Integration Docs
+# Frontend integration docs
 
-One guide per phase, published after backend implementation ships.
-
-| Phase | Doc | Covers |
-|---|---|---|
-| 1 | [phase-1-frontend-integration.md](phase-1-frontend-integration.md) | Signup, session |
-| 2 | [phase-2-frontend-integration.md](phase-2-frontend-integration.md) | Timeline, GitHub |
-| 3 | [phase-3-frontend-integration.md](phase-3-frontend-integration.md) | Data models, full API client, all screens |
-| 4 | — | JWT auth: [phase-4-frontend-integration.md](phase-4-frontend-integration.md) |
-| 5 | All connectors | [phase-5-all-connectors-frontend.md](phase-5-all-connectors-frontend.md) |
-| 5+ | TBD | When AI endpoints ship |
-
-## Convention
-
-Each doc includes: env setup, TypeScript types, API client, screen mapping, examples, checklist.
-
-```env
-VITE_API_URL=http://localhost:3000
-```
+| Doc | Covers |
+|---|---|
+| [github-identify-commits-by-project.md](github-identify-commits-by-project.md) | Memory Explorer: show / filter commits by `projectId` (repo) so they are not mixed visually |
+| [github-projects-commits.md](github-projects-commits.md) | Connect → list projects → sync / list commits (API + types) |

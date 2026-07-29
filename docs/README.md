@@ -26,15 +26,13 @@ Complete startup blueprint. Each phase ships backend + matching frontend integra
 
 ## Frontend Integration
 
-Written after each phase's backend ships. See [frontend/README.md](frontend/README.md).
+See [frontend/README.md](frontend/README.md).
 
-| Phase | Document                                                                    | Covers                                    |
-| ----- | --------------------------------------------------------------------------- | ----------------------------------------- |
-| 1     | [phase-1-frontend-integration.md](frontend/phase-1-frontend-integration.md) | Signup, session                           |
-| 2     | [phase-2-frontend-integration.md](frontend/phase-2-frontend-integration.md) | Timeline, GitHub                          |
-| 3     | [phase-3-frontend-integration.md](frontend/phase-3-frontend-integration.md) | Data models, full API client, all screens |
-| 4     | [phase-4-frontend-integration.md](frontend/phase-4-frontend-integration.md) | JWT auth, retention, breaking API changes |
-| 5     | [phase-5-all-connectors-frontend.md](frontend/phase-5-all-connectors-frontend.md) | All source chips: connect / sync / ingest |
+| Doc | Covers |
+| --- | --- |
+| [Identify commits by project](frontend/github-identify-commits-by-project.md) | Memory Explorer: show repo on cards / filter by `projectId` |
+| [GitHub projects → commits](frontend/github-projects-commits.md) | Connect, list projects, sync / list commits |
+| [frontend/README.md](frontend/README.md) | Index |
 
 ## Upcoming
 
@@ -59,7 +57,9 @@ VITE_API_URL=http://localhost:3000
 GET /timeline/replay?userId=...&date=YYYY-MM-DD&timezone=Asia/Kolkata
 ```
 
-**End-to-end flow:** Signup → Connect GitHub → Sync → Replay
+**End-to-end flow:** Signup → Connect GitHub → List projects → Sync project → Memories / Replay
+
+GitHub repo-on-card guide: [frontend/github-identify-commits-by-project.md](frontend/github-identify-commits-by-project.md)
 
 Full curl examples: [phase-4-api-documentation.md](api/phase-4-api-documentation.md#appendix--end-to-end-developer-flow)
 

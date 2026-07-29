@@ -13,22 +13,39 @@ import GitHubConnectionEntity, {
 
 type GitHubUser = { login: string; id: number };
 
-type GitHubApiEvent = {
-  id: string;
-  type: string;
-  repo: { name: string };
-  payload: Record<string, unknown>;
-  created_at: string;
+export type GitHubProject = {
+  name: string;
+  full_name: string;
+  description: string | null;
+  html_url: string;
+  pushed_at: string | null;
+  private: boolean;
 };
 
-type GitHubCommit = {
+type GitHubRepoApi = {
+  name: string;
+  full_name: string;
+  description: string | null;
+  html_url: string;
+  pushed_at: string | null;
+  private: boolean;
+};
+
+type GitHubCommitApi = {
   sha: string;
-  commit: { message: string };
+  html_url: string;
+  commit: {
+    message: string;
+    author: { name?: string; email?: string; date?: string } | null;
+    committer: { name?: string; email?: string; date?: string } | null;
+  };
+  author: { login?: string } | null;
 };
 
 @Injectable()
 export class GitHubService {
   private readonly apiBase = 'https://api.github.com';
+  private readonly commitsPerRepo = 30;
 
   constructor(
     @Inject('GITHUB_CONNECTION_REPOSITORY')
@@ -69,33 +86,93 @@ export class GitHubService {
     };
   }
 
+  async listProjects(userId: string): Promise<{ projects: GitHubProject[] }> {
+    const conn = await this.getConnection(userId);
+    const plainToken = this.encryptionService.decrypt(conn.accessToken);
+    const projects = await this.fetchUserRepos(plainToken);
+    return { projects };
+  }
+
   async sync(
     userId: string,
   ): Promise<{ synced: number; skipped: number; updated: number }> {
     const conn = await this.getConnection(userId);
     const plainToken = this.encryptionService.decrypt(conn.accessToken);
-    const ghEvents = await this.fetchUserEvents(
+    const projects = await this.fetchUserRepos(plainToken);
+
+    let synced = 0;
+    let skipped = 0;
+    let updated = 0;
+
+    for (const project of projects) {
+      const counts = await this.syncRepoCommits(
+        userId,
+        plainToken,
+        project.full_name,
+        conn.githubUsername,
+      );
+      synced += counts.synced;
+      skipped += counts.skipped;
+      updated += counts.updated;
+    }
+
+    conn.lastSyncedAt = new Date();
+    await conn.save();
+
+    return { synced, skipped, updated };
+  }
+
+  async syncProject(
+    userId: string,
+    owner: string,
+    repo: string,
+  ): Promise<{ synced: number; skipped: number; updated: number; projectId: string }> {
+    const conn = await this.getConnection(userId);
+    const plainToken = this.encryptionService.decrypt(conn.accessToken);
+    const projectId = `${owner}/${repo}`;
+
+    const counts = await this.syncRepoCommits(
+      userId,
       plainToken,
+      projectId,
       conn.githubUsername,
+    );
+
+    conn.lastSyncedAt = new Date();
+    await conn.save();
+
+    return { ...counts, projectId };
+  }
+
+  private async syncRepoCommits(
+    userId: string,
+    accessToken: string,
+    fullName: string,
+    authorLogin: string,
+  ): Promise<{ synced: number; skipped: number; updated: number }> {
+    const [owner, repo] = fullName.split('/');
+    if (!owner || !repo) {
+      return { synced: 0, skipped: 0, updated: 0 };
+    }
+
+    const commits = await this.fetchRepoCommits(
+      accessToken,
+      owner,
+      repo,
+      authorLogin,
     );
 
     let synced = 0;
     let skipped = 0;
     let updated = 0;
 
-    for (const gh of ghEvents) {
-      const dto = await this.mapGitHubEventToDto(gh, plainToken);
-      const result = await this.eventService.upsertBySourceEventId(
-        userId,
-        dto,
-      );
+    for (const commit of commits) {
+      const dto = this.mapCommitToDto(fullName, commit);
+      const result = await this.eventService.upsertBySourceEventId(userId, dto);
       if (result === 'created') synced++;
       else if (result === 'updated') updated++;
       else skipped++;
     }
-
-    conn.lastSyncedAt = new Date();
-    await conn.save();
 
     return { synced, skipped, updated };
   }
@@ -126,103 +203,85 @@ export class GitHubService {
     return res.json() as Promise<GitHubUser>;
   }
 
-  private async fetchUserEvents(
-    accessToken: string,
-    username: string,
-  ): Promise<GitHubApiEvent[]> {
-    const endpoints = [
-      `${this.apiBase}/user/events?per_page=100`,
-      `${this.apiBase}/users/${encodeURIComponent(username)}/events?per_page=100`,
-      `${this.apiBase}/users/${encodeURIComponent(username)}/events/public?per_page=100`,
-    ];
-
-    let lastStatus = 0;
-    let lastStatusText = '';
-
-    for (const url of endpoints) {
-      const res = await fetch(url, {
-        headers: this.authHeaders(accessToken),
-      });
-
-      if (res.ok) {
-        return res.json() as Promise<GitHubApiEvent[]>;
-      }
-
-      lastStatus = res.status;
-      lastStatusText = res.statusText;
-
-      if (res.status !== 404 && res.status !== 403) {
-        break;
-      }
-    }
-
-    throw new BadRequestException(
-      `GitHub API error: ${lastStatus} ${lastStatusText}. ` +
-        'Create a Classic PAT with the "repo" scope checked (not Fine-grained), ' +
-        'then reconnect in the app. Tokens with no scopes can connect but cannot sync.',
-    );
-  }
-
-  /**
-   * Events API often omits payload.commits. Fetch messages via Commits API.
-   */
-  private async resolvePushCommitMessages(
-    accessToken: string,
-    repo: string,
-    payload: Record<string, unknown>,
-  ): Promise<{ messages: string[]; shortSha: string }> {
-    const head = (payload.head as string) ?? '';
-    const before = (payload.before as string) ?? '';
-    const shortSha = head ? head.slice(0, 7) : '';
-
-    const fromPayload = (payload.commits as { message?: string }[]) ?? [];
-    const payloadMessages = fromPayload
-      .map((c) => c.message?.trim())
-      .filter((m): m is string => !!m);
-
-    if (payloadMessages.length > 0) {
-      return { messages: payloadMessages, shortSha };
-    }
-
-    if (!head || !repo.includes('/')) {
-      return { messages: [], shortSha };
-    }
-
-    // Prefer compare when we have before → head (multi-commit pushes)
-    const zeroSha = /^0+$/;
-    if (before && !zeroSha.test(before) && before !== head) {
-      const compareUrl = `${this.apiBase}/repos/${repo}/compare/${before}...${head}`;
-      const compareRes = await fetch(compareUrl, {
-        headers: this.authHeaders(accessToken),
-      });
-      if (compareRes.ok) {
-        const data = (await compareRes.json()) as {
-          commits?: GitHubCommit[];
-        };
-        const messages =
-          data.commits
-            ?.map((c) => c.commit?.message?.trim())
-            .filter((m): m is string => !!m) ?? [];
-        if (messages.length > 0) {
-          return { messages, shortSha };
-        }
-      }
-    }
-
-    // Fallback: single commit by head SHA
-    const commitUrl = `${this.apiBase}/repos/${repo}/commits/${head}`;
-    const commitRes = await fetch(commitUrl, {
+  private async fetchUserRepos(accessToken: string): Promise<GitHubProject[]> {
+    const url =
+      `${this.apiBase}/user/repos` +
+      `?affiliation=owner,collaborator&sort=pushed&per_page=100`;
+    const res = await fetch(url, {
       headers: this.authHeaders(accessToken),
     });
-    if (commitRes.ok) {
-      const data = (await commitRes.json()) as GitHubCommit;
-      const message = data.commit?.message?.trim();
-      if (message) {
-        return { messages: [message], shortSha };
-      }
+
+    if (!res.ok) {
+      throw new BadRequestException(
+        `GitHub API error: ${res.status} ${res.statusText}. ` +
+          'Create a Classic PAT with the "repo" scope checked (not Fine-grained), ' +
+          'then reconnect in the app.',
+      );
     }
 
-    return { messages: [], shortSha };
+    const repos = (await res.json()) as GitHubRepoApi[];
+    return repos.map((r) => ({
+      name: r.name,
+      full_name: r.full_name,
+      description: r.description,
+      html_url: r.html_url,
+      pushed_at: r.pushed_at,
+      private: r.private,
+    }));
+  }
+
+  private async fetchRepoCommits(
+    accessToken: string,
+    owner: string,
+    repo: string,
+    authorLogin: string,
+  ): Promise<GitHubCommitApi[]> {
+    const params = new URLSearchParams({
+      per_page: String(this.commitsPerRepo),
+      author: authorLogin,
+    });
+    const url = `${this.apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?${params}`;
+    const res = await fetch(url, {
+      headers: this.authHeaders(accessToken),
+    });
+
+    // Empty / inaccessible repos should not fail the whole sync
+    if (res.status === 409 || res.status === 404) {
+      return [];
+    }
+
+    if (!res.ok) {
+      throw new BadRequestException(
+        `GitHub commits API error for ${owner}/${repo}: ${res.status} ${res.statusText}`,
+      );
+    }
+
+    return res.json() as Promise<GitHubCommitApi[]>;
+  }
+
+  mapCommitToDto(fullName: string, commit: GitHubCommitApi): CreateEventDto {
+    const message = commit.commit?.message?.trim() ?? '';
+    const firstLine = message.split('\n')[0] || `Commit ${commit.sha.slice(0, 7)}`;
+    const occurredAt =
+      commit.commit?.author?.date ??
+      commit.commit?.committer?.date ??
+      new Date().toISOString();
+
+    return {
+      source: 'github',
+      type: 'commit',
+      title: firstLine,
+      content: message,
+      occurredAt,
+      projectId: fullName,
+      sourceEventId: `github-commit-${commit.sha}`,
+      tags: ['commit'],
+      metadata: {
+        sha: commit.sha,
+        html_url: commit.html_url,
+        repo: fullName,
+      },
+    };
   }
 
   private authHeaders(accessToken: string): Record<string, string> {
@@ -231,122 +290,5 @@ export class GitHubService {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
     };
-  }
-
-  async mapGitHubEventToDto(
-    gh: GitHubApiEvent,
-    accessToken: string,
-  ): Promise<CreateEventDto> {
-    const repo = gh.repo.name;
-    const payload = gh.payload;
-    const { type, title, content } = await this.resolveEventContent(
-      gh.type,
-      repo,
-      payload,
-      accessToken,
-    );
-
-    return {
-      source: 'github',
-      type,
-      title,
-      content,
-      occurredAt: gh.created_at,
-      projectId: repo,
-      sourceEventId: `github-${gh.id}`,
-      tags: [gh.type],
-      metadata: {
-        githubEventType: gh.type,
-        repo,
-        payload,
-      },
-    };
-  }
-
-  private async resolveEventContent(
-    ghType: string,
-    repo: string,
-    payload: Record<string, unknown>,
-    accessToken: string,
-  ): Promise<{ type: CreateEventDto['type']; title: string; content: string }> {
-    switch (ghType) {
-      case 'PushEvent': {
-        const { messages, shortSha } = await this.resolvePushCommitMessages(
-          accessToken,
-          repo,
-          payload,
-        );
-        const firstLine = messages[0]?.split('\n')[0] ?? '';
-        const title = firstLine
-          ? `${firstLine}${shortSha ? ` (${shortSha})` : ''}`
-          : `Push to ${repo}${shortSha ? ` (${shortSha})` : ''}`;
-        const content =
-          messages.length > 0
-            ? messages.join('\n\n')
-            : `Push to ${repo}${shortSha ? ` @ ${shortSha}` : ''}`;
-        return { type: 'commit', title, content };
-      }
-      case 'PullRequestEvent': {
-        const pr = payload.pull_request as {
-          number: number;
-          title: string;
-          body: string | null;
-        };
-        const action = (payload.action as string) ?? 'updated';
-        return {
-          type: 'message',
-          title: `PR #${pr?.number ?? '?'}: ${pr?.title ?? repo} (${action})`,
-          content: pr?.body ?? '',
-        };
-      }
-      case 'IssuesEvent': {
-        const issue = payload.issue as {
-          number: number;
-          title: string;
-          body: string | null;
-        };
-        const action = (payload.action as string) ?? 'updated';
-        return {
-          type: 'note',
-          title: `Issue #${issue?.number ?? '?'}: ${issue?.title ?? repo} (${action})`,
-          content: issue?.body ?? '',
-        };
-      }
-      case 'CreateEvent': {
-        const refType = (payload.ref_type as string) ?? 'resource';
-        const ref = (payload.ref as string) ?? '';
-        return {
-          type: 'other',
-          title: `Created ${refType}${ref ? ` ${ref}` : ''} in ${repo}`,
-          content: '',
-        };
-      }
-      case 'WatchEvent':
-        return {
-          type: 'other',
-          title: `Starred ${repo}`,
-          content: '',
-        };
-      case 'ForkEvent':
-        return {
-          type: 'other',
-          title: `Forked ${repo}`,
-          content: '',
-        };
-      case 'DeleteEvent': {
-        const refType = (payload.ref_type as string) ?? 'resource';
-        return {
-          type: 'other',
-          title: `Deleted ${refType} in ${repo}`,
-          content: '',
-        };
-      }
-      default:
-        return {
-          type: 'other',
-          title: `${ghType} on ${repo}`,
-          content: JSON.stringify(payload).slice(0, 500),
-        };
-    }
   }
 }
