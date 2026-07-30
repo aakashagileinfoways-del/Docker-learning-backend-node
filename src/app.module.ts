@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AiModule } from './AiModule/aiModule';
 import { AuthModule } from './AuthModule/auth.module';
 import { CommonModule } from './common/common.module';
 import { ConnectorsModule } from './ConnectorsModule/connectorsModule';
@@ -22,6 +23,7 @@ import { UserModule } from './UserModule/userModule';
     TimelineModule,
     GitHubModule,
     ConnectorsModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [AppService],

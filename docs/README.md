@@ -30,6 +30,7 @@ See [frontend/README.md](frontend/README.md).
 
 | Doc | Covers |
 | --- | --- |
+| [AI Understand — ask / search](frontend/ai-understand-search.md) | “What was I doing?” + semantic moment search |
 | [Identify commits by project](frontend/github-identify-commits-by-project.md) | Memory Explorer: show repo on cards / filter by `projectId` |
 | [GitHub projects → commits](frontend/github-projects-commits.md) | Connect, list projects, sync / list commits |
 | [frontend/README.md](frontend/README.md) | Index |
@@ -38,7 +39,7 @@ See [frontend/README.md](frontend/README.md).
 
 | Phase | Topic                        | Status  |
 | ----- | ---------------------------- | ------- |
-| 5+    | AI (embeddings, RAG, memory) | Planned |
+| 5+    | AI (embeddings, RAG, memory) | ✅ v1: `/ai/ask` + `/ai/search` (text rank + optional OpenAI) |
 | 6     | UI/UX wireframes             | Planned |
 | 7     | DevOps (Docker, K8s, CI)     | Planned |
 | 8     | Investor documents           | Planned |

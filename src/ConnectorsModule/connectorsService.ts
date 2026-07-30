@@ -288,12 +288,21 @@ export class ConnectorsService {
   }
 
   async createManualNote(userId: string, dto: ManualNoteDto) {
-    const occurredAt = dto.occurredAt ?? new Date().toISOString();
+    let occurredAt = dto.occurredAt ?? new Date().toISOString();
+    // Guard against bad frontend dates (e.g. year 2020) wiping notes from free retention
+    const occurred = new Date(occurredAt);
+    const ageDays =
+      (Date.now() - occurred.getTime()) / (1000 * 60 * 60 * 24);
+    if (!Number.isFinite(occurred.getTime()) || ageDays > 28) {
+      occurredAt = new Date().toISOString();
+    }
+
     const event = await this.eventService.createEvent(userId, {
       source: 'manual',
       type: 'note',
       title: dto.title,
       content: dto.content ?? '',
+      summary: dto.summary ?? '',
       occurredAt,
       projectId: dto.projectId,
       tags: dto.tags ?? ['manual'],

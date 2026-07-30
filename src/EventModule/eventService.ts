@@ -163,6 +163,102 @@ export class EventService {
     };
   }
 
+  /** Candidates for AI search / ask (retention-aware). */
+  async findCandidates(
+    userId: string,
+    opts: {
+      from?: Date;
+      to?: Date;
+      source?: string;
+      projectId?: string;
+      limit?: number;
+    },
+  ): Promise<EventDocument[]> {
+    const tier = await this.userService.getUserTier(userId);
+    const cutoff = getRetentionCutoff(tier);
+    const filter: Record<string, unknown> = { userId };
+
+    let occurredAt: Record<string, Date> = {};
+    if (opts.from) occurredAt.$gte = opts.from;
+    if (opts.to) occurredAt.$lte = opts.to;
+    if (cutoff) {
+      occurredAt.$gte = mergeOccurredAtGte(occurredAt.$gte, cutoff);
+    }
+    if (Object.keys(occurredAt).length > 0) {
+      filter.occurredAt = occurredAt;
+    }
+    if (opts.source) filter.source = opts.source;
+    if (opts.projectId) filter.projectId = opts.projectId;
+
+    return this.eventRepository
+      .find(filter)
+      .sort({ occurredAt: -1 })
+      .limit(opts.limit ?? 300)
+      .exec();
+  }
+
+  /**
+   * Keyword recall across retention window — ensures notes/commits that
+   * answer the question are not lost among recent browse noise.
+   */
+  async findTextMatches(
+    userId: string,
+    tokens: string[],
+    opts: {
+      source?: string;
+      projectId?: string;
+      limit?: number;
+    } = {},
+  ): Promise<EventDocument[]> {
+    const meaningful = tokens
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t.length >= 3)
+      .slice(0, 8);
+    if (meaningful.length === 0) return [];
+
+    const tier = await this.userService.getUserTier(userId);
+    const cutoff = getRetentionCutoff(tier);
+    const escaped = meaningful.map((t) =>
+      t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    );
+    const re = escaped.join('|');
+
+    const filter: Record<string, unknown> = {
+      userId,
+      $or: [
+        { title: { $regex: re, $options: 'i' } },
+        { content: { $regex: re, $options: 'i' } },
+        { summary: { $regex: re, $options: 'i' } },
+        { projectId: { $regex: re, $options: 'i' } },
+        { tags: { $elemMatch: { $regex: re, $options: 'i' } } },
+      ],
+    };
+    if (cutoff) filter.occurredAt = { $gte: cutoff };
+    if (opts.source) filter.source = opts.source;
+    if (opts.projectId) filter.projectId = opts.projectId;
+
+    return this.eventRepository
+      .find(filter)
+      .sort({ occurredAt: -1 })
+      .limit(opts.limit ?? 100)
+      .exec();
+  }
+
+  /** Always pull manual/notes — user-authored reasons for AI ask (no retention cut). */
+  async findManualNotes(
+    userId: string,
+    opts: { limit?: number } = {},
+  ): Promise<EventDocument[]> {
+    return this.eventRepository
+      .find({
+        userId,
+        $or: [{ source: 'manual' }, { type: 'note' }],
+      })
+      .sort({ occurredAt: -1 })
+      .limit(opts.limit ?? 100)
+      .exec();
+  }
+
   private buildFilter(
     userId: string,
     query: ListEventsQueryDto,

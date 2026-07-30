@@ -90,6 +90,10 @@ export class ManualNoteDto {
   content?: string;
 
   @IsOptional()
+  @IsString()
+  summary?: string;
+
+  @IsOptional()
   @IsDateString()
   occurredAt?: string;
 
