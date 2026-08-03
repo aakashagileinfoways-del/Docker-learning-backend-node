@@ -49,7 +49,7 @@ export class IngestEventItemDto {
   content?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString() 
   summary?: string;
 
   @IsOptional()
