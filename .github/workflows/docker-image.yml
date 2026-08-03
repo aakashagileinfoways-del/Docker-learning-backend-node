@@ -1,18 +1,30 @@
 name: Docker Image CI
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select Environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Show Details
+        run: |
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+
+      - name: Build Docker Image
+        run: |
+          docker build -t my-image:${{ github.sha }} .
